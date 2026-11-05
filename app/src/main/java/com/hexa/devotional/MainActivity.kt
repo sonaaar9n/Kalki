@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -74,17 +75,34 @@ private val categories = listOf(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { DevotionalApp() }
+        setContent {
+            DevotionalApp()
+        }
     }
 }
 
 @Composable
 private fun DevotionalApp() {
+    val context = LocalContext.current
+
+    var selectedOffice by remember {
+        mutableStateOf(PinCodeRepository.loadSavedOffice(context))
+    }
+
+    if (selectedOffice == null) {
+        PinSetupScreen { office ->
+            selectedOffice = office
+        }
+        return
+    }
+
+    val office = selectedOffice ?: return
+    val location = office.displayAddress
+
     var dark by remember { mutableStateOf(true) }
     var page by remember { mutableStateOf("home") }
     var deity by remember { mutableStateOf(deities.first()) }
     var category by remember { mutableStateOf(categories.first()) }
-    var location by remember { mutableStateOf("स्थान चुनें") }
 
     val bg = if (dark) DarkBg else LightBg
     val card = if (dark) DarkCard else LightCard
@@ -93,37 +111,73 @@ private fun DevotionalApp() {
 
     MaterialTheme(
         colorScheme = if (dark)
-            darkColorScheme(primary = Gold, background = bg, surface = card)
+            darkColorScheme(
+                primary = Gold,
+                background = bg,
+                surface = card
+            )
         else
-            lightColorScheme(primary = Color(0xFF795A24), background = bg, surface = card)
+            lightColorScheme(
+                primary = Color(0xFF795A24),
+                background = bg,
+                surface = card
+            )
     ) {
-        Surface(Modifier.fillMaxSize(), color = bg) {
+        Surface(
+            Modifier.fillMaxSize(),
+            color = bg
+        ) {
             Column(Modifier.fillMaxSize()) {
-                Header(dark, fg, muted) { page = "settings" }
+
+                Header(dark, fg, muted) {
+                    page = "settings"
+                }
 
                 when (page) {
-                    "home" -> Home(fg, muted) { page = "menu" }
+                    "home" -> Home(fg, muted) {
+                        page = "menu"
+                    }
+
                     "menu" -> Menu(deities, fg, muted, card) {
                         deity = it
                         page = "deity"
                     }
+
                     "deity" -> DeityPage(
-                        deity, fg, muted, card,
+                        deity,
+                        fg,
+                        muted,
+                        card,
                         { page = "menu" }
                     ) {
                         category = it
                         page = "reader"
                     }
-                    "reader" -> Reader(deity, category, fg, muted) {
+
+                    "reader" -> Reader(
+                        deity,
+                        category,
+                        fg,
+                        muted
+                    ) {
                         page = "deity"
                     }
+
                     "settings" -> Settings(
-                        dark, location, fg, muted, card,
+                        dark,
+                        location,
+                        fg,
+                        muted,
+                        card,
                         { dark = it },
-                        { location = it },
                         { page = "panchang" }
                     )
-                    "panchang" -> Panchang(location, fg, muted) {
+
+                    "panchang" -> Panchang(
+                        location,
+                        fg,
+                        muted
+                    ) {
                         page = "settings"
                     }
                 }
@@ -139,7 +193,9 @@ private fun Header(
     muted: Color,
     settings: () -> Unit
 ) {
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    var now by remember {
+        mutableStateOf(LocalDateTime.now())
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -153,7 +209,10 @@ private fun Header(
     )
 
     val date = now.format(
-        DateTimeFormatter.ofPattern("dd MMM yyyy · EEEE", Locale("hi", "IN"))
+        DateTimeFormatter.ofPattern(
+            "dd MMM yyyy · EEEE",
+            Locale("hi", "IN")
+        )
     )
 
     Row(
@@ -167,7 +226,11 @@ private fun Header(
             color = if (dark) DarkCard else Color(0xFFE9E0D0)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Settings, "Settings", tint = Gold)
+                Icon(
+                    Icons.Default.Settings,
+                    "Settings",
+                    tint = Gold
+                )
             }
         }
 
@@ -178,8 +241,14 @@ private fun Header(
                 fontSize = 21.sp,
                 fontWeight = FontWeight.SemiBold
             )
+
             Text(date, color = muted, fontSize = 11.sp)
-            Text("हिंदू तिथि: गणना लंबित", color = Gold, fontSize = 10.sp)
+
+            Text(
+                "हिंदू तिथि: गणना लंबित",
+                color = Gold,
+                fontSize = 10.sp
+            )
         }
     }
 }
@@ -196,16 +265,18 @@ private fun Home(
         verticalArrangement = Arrangement.Center
     ) {
         Box(
-            Modifier.fillMaxWidth().weight(1f).background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF263449),
-                        Color(0xFF171B25),
-                        Color(0xFF3A2B22)
-                    )
+            Modifier.fillMaxWidth()
+                .weight(1f)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF263449),
+                            Color(0xFF171B25),
+                            Color(0xFF3A2B22)
+                        )
+                    ),
+                    RoundedCornerShape(24.dp)
                 ),
-                RoundedCornerShape(24.dp)
-            ),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -215,12 +286,14 @@ private fun Home(
                     fontSize = 38.sp,
                     fontWeight = FontWeight.Bold
                 )
+
                 Text(
                     "आपका चुना हुआ 4K नटराज वॉलपेपर यहाँ आएगा",
                     color = Color.White,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(16.dp)
                 )
+
                 Text(
                     "3D VISUAL HOME — PLACEHOLDER",
                     color = Gold,
@@ -230,6 +303,7 @@ private fun Home(
         }
 
         Spacer(Modifier.height(18.dp))
+
         Text("डबल टैप करें", color = muted, fontSize = 13.sp)
 
         Text(
@@ -240,7 +314,11 @@ private fun Home(
             fontWeight = FontWeight.SemiBold
         )
 
-        Text("मेन्यू खोलने के लिए यहाँ टैप करें", color = muted, fontSize = 11.sp)
+        Text(
+            "मेन्यू खोलने के लिए यहाँ टैप करें",
+            color = muted,
+            fontSize = 11.sp
+        )
     }
 }
 
@@ -276,20 +354,35 @@ private fun Menu(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
-                        Modifier.fillMaxWidth().aspectRatio(.9f).background(
-                            androidx.compose.ui.graphics.Brush.verticalGradient(
-                                listOf(Color(0xFF514333), Color(0xFF252A36))
+                        Modifier.fillMaxWidth()
+                            .aspectRatio(.9f)
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    listOf(
+                                        Color(0xFF514333),
+                                        Color(0xFF252A36)
+                                    )
+                                ),
+                                RoundedCornerShape(12.dp)
                             ),
-                            RoundedCornerShape(12.dp)
-                        ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("ॐ", color = Gold, fontSize = 54.sp)
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    Text(item.name, color = fg, fontWeight = FontWeight.SemiBold)
-                    Text(item.subtitle, color = muted, fontSize = 11.sp)
+
+                    Text(
+                        item.name,
+                        color = fg,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        item.subtitle,
+                        color = muted,
+                        fontSize = 11.sp
+                    )
                 }
             }
         }
@@ -313,25 +406,49 @@ private fun DeityPage(
         Text(
             "‹ वापस",
             color = Gold,
-            modifier = Modifier.clickable { back() }.padding(vertical = 8.dp)
+            modifier = Modifier.clickable { back() }
+                .padding(vertical = 8.dp)
         )
-        Text(deity.name, color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+
+        Text(
+            deity.name,
+            color = fg,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+
         Text(deity.subtitle, color = muted)
+
         Spacer(Modifier.height(18.dp))
 
         categories.forEach { item ->
             Row(
-                Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                Modifier.fillMaxWidth()
+                    .padding(bottom = 10.dp)
                     .background(card, RoundedCornerShape(14.dp))
                     .clickable { open(item) }
                     .padding(18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(item.name, color = fg, fontWeight = FontWeight.SemiBold)
-                    Text(item.description, color = muted, fontSize = 12.sp)
+                    Text(
+                        item.name,
+                        color = fg,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Text(
+                        item.description,
+                        color = muted,
+                        fontSize = 12.sp
+                    )
                 }
-                Icon(Icons.Default.ChevronRight, null, tint = Gold)
+
+                Icon(
+                    Icons.Default.ChevronRight,
+                    null,
+                    tint = Gold
+                )
             }
         }
     }
@@ -350,10 +467,23 @@ private fun Reader(
             .verticalScroll(rememberScrollState())
             .padding(20.dp)
     ) {
-        Text("‹ वापस", color = Gold, modifier = Modifier.clickable { back() })
+        Text(
+            "‹ वापस",
+            color = Gold,
+            modifier = Modifier.clickable { back() }
+        )
+
         Spacer(Modifier.height(24.dp))
+
         Text(deity.name, color = muted, fontSize = 13.sp)
-        Text(category.name, color = fg, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+
+        Text(
+            category.name,
+            color = fg,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold
+        )
+
         Spacer(Modifier.height(22.dp))
 
         Text(
@@ -362,14 +492,18 @@ private fun Reader(
             fontSize = 19.sp,
             lineHeight = 32.sp
         )
+
         Spacer(Modifier.height(12.dp))
+
         Text(
             "यह नमूना पृष्ठ है। वास्तविक संस्कृत या देवनागरी सामग्री बाद में जोड़ी जाएगी।",
             color = muted,
             fontSize = 15.sp,
             lineHeight = 26.sp
         )
+
         Spacer(Modifier.height(30.dp))
+
         Text(
             "पृष्ठ 1",
             color = Gold,
@@ -386,7 +520,6 @@ private fun Settings(
     muted: Color,
     card: Color,
     setDark: (Boolean) -> Unit,
-    setLocation: (String) -> Unit,
     openPanchang: () -> Unit
 ) {
     Column(
@@ -394,52 +527,55 @@ private fun Settings(
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        Text("सेटिंग्स", color = fg, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "सेटिंग्स",
+            color = fg,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold
+        )
+
         Spacer(Modifier.height(18.dp))
+
         Text("दिखावट", color = Gold, fontWeight = FontWeight.SemiBold)
 
         Row(
-            Modifier.fillMaxWidth().background(card, RoundedCornerShape(14.dp)).padding(14.dp),
+            Modifier.fillMaxWidth()
+                .background(card, RoundedCornerShape(14.dp))
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Dark Mode", color = fg, modifier = Modifier.weight(1f))
-            Switch(checked = dark, onCheckedChange = setDark)
+            Text(
+                "Dark Mode",
+                color = fg,
+                modifier = Modifier.weight(1f)
+            )
+
+            Switch(
+                checked = dark,
+                onCheckedChange = setDark
+            )
         }
 
         Spacer(Modifier.height(20.dp))
+
         Text("देव पंचांग", color = Gold, fontWeight = FontWeight.SemiBold)
 
         Column(
-            Modifier.fillMaxWidth().background(card, RoundedCornerShape(14.dp)).padding(14.dp)
+            Modifier.fillMaxWidth()
+                .background(card, RoundedCornerShape(14.dp))
+                .padding(14.dp)
         ) {
-            Text("Default Location", color = fg, fontWeight = FontWeight.Medium)
-            Text(location, color = muted, fontSize = 12.sp)
+            Text(
+                "Saved Location",
+                color = fg,
+                fontWeight = FontWeight.Medium
+            )
 
-            var expanded by remember { mutableStateOf(false) }
-
-            Box {
-                OutlinedButton(onClick = { expanded = true }) {
-                    Text("स्थान चुनें")
-                }
-
-                DropdownMenu(expanded, { expanded = false }) {
-                    listOf(
-                        "उज्जैन, मध्य प्रदेश",
-                        "वाराणसी, उत्तर प्रदेश",
-                        "नई दिल्ली",
-                        "रायपुर, छत्तीसगढ़",
-                        "भोपाल, मध्य प्रदेश"
-                    ).forEach { city ->
-                        DropdownMenuItem(
-                            text = { Text(city) },
-                            onClick = {
-                                setLocation(city)
-                                expanded = false
-                            }
-                        )
-                    }
-                }
-            }
+            Text(
+                location,
+                color = muted,
+                fontSize = 12.sp
+            )
 
             TextButton(onClick = openPanchang) {
                 Text("देव पंचांग खोलें")
@@ -447,7 +583,12 @@ private fun Settings(
         }
 
         Spacer(Modifier.height(20.dp))
-        Text("HEXA Devotional · Version 0.1.0", color = muted, fontSize = 11.sp)
+
+        Text(
+            "HEXA Devotional · Version 0.1.0",
+            color = muted,
+            fontSize = 11.sp
+        )
     }
 }
 
@@ -463,21 +604,45 @@ private fun Panchang(
             .verticalScroll(rememberScrollState())
             .padding(18.dp)
     ) {
-        Text("‹ सेटिंग्स", color = Gold, modifier = Modifier.clickable { back() })
+        Text(
+            "‹ सेटिंग्स",
+            color = Gold,
+            modifier = Modifier.clickable { back() }
+        )
+
         Spacer(Modifier.height(16.dp))
-        Text("॥ देव पंचांग ॥", color = fg, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-        Text("स्थान: $location", color = muted, fontSize = 13.sp)
+
+        Text(
+            "॥ देव पंचांग ॥",
+            color = fg,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            "स्थान: $location",
+            color = muted,
+            fontSize = 13.sp
+        )
+
         Spacer(Modifier.height(18.dp))
 
         Text(
-            "सही तिथि के लिए स्थान-आधारित खगोलीय गणना इंजन जोड़ा जाना बाकी है। अभी कोई अनुमानित तिथि नहीं दिखाई जा रही है।",
+            "स्थान-आधारित पंचांग गणना का अगला चरण अभी तैयार किया जा रहा है।",
             color = Gold,
             fontSize = 13.sp,
             lineHeight = 22.sp
         )
 
         Spacer(Modifier.height(12.dp))
-        Text("शुक्ल पक्ष की तिथियाँ", color = fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+
+        Text(
+            "शुक्ल पक्ष की तिथियाँ",
+            color = fg,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
         Text(
             "एकम 1 · दूज 2 · तीज 3 · चतुर्थी 4 · पंचमी 5 · षष्ठी 6 · सप्तमी 7 · अष्टमी 8 · नवमी 9 · दशमी 10 · ग्यारस 11 · बारस 12 · तेरस 13 · चौदस 14 · पूर्णिमा 15",
             color = muted,
@@ -486,7 +651,14 @@ private fun Panchang(
         )
 
         Spacer(Modifier.height(10.dp))
-        Text("कृष्ण पक्ष की तिथियाँ", color = fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+
+        Text(
+            "कृष्ण पक्ष की तिथियाँ",
+            color = fg,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
         Text(
             "एकम 1 · दूज 2 · तीज 3 · चतुर्थी 4 · पंचमी 5 · षष्ठी 6 · सप्तमी 7 · अष्टमी 8 · नवमी 9 · दशमी 10 · ग्यारस 11 · बारस 12 · तेरस 13 · चौदस 14 · अमावस्या 15",
             color = muted,
@@ -497,11 +669,18 @@ private fun Panchang(
         Spacer(Modifier.height(12.dp))
 
         listOf(
-            "तिथि", "पक्ष", "नक्षत्र", "योग",
-            "करण", "संवत", "सूर्योदय", "सूर्यास्त"
+            "तिथि",
+            "पक्ष",
+            "नक्षत्र",
+            "योग",
+            "करण",
+            "संवत",
+            "सूर्योदय",
+            "सूर्यास्त"
         ).forEach {
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                Modifier.fillMaxWidth()
+                    .padding(vertical = 5.dp)
                     .background(DarkCard, RoundedCornerShape(10.dp))
                     .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
