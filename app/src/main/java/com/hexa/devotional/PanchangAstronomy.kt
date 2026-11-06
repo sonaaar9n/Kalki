@@ -15,6 +15,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.floor
 
 data class PanchangDailyData(
     val tithi: String,
@@ -22,7 +23,9 @@ data class PanchangDailyData(
     val tithiNumber: Int,
     val sunrise: String,
     val sunset: String,
-    val calculationStatus: String
+    val calculationStatus: String,
+    val tithiStart: String = "उपलब्ध नहीं",
+    val tithiEnd: String = "उपलब्ध नहीं"
 )
 
 object PanchangAstronomy {
@@ -31,6 +34,15 @@ object PanchangAstronomy {
 
     private val timeFormat =
         DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH)
+
+    private val dateTimeFormat =
+        DateTimeFormatter.ofPattern(
+            "dd MMM, hh:mm a",
+            Locale("hi", "IN")
+        )
+
+    private const val SEARCH_STEP_MILLIS = 30 * 60 * 1000L
+    private const val BISECTION_TOLERANCE_MILLIS = 1000L
 
     private val tithiNames = listOf(
         "प्रतिपदा",
@@ -60,7 +72,6 @@ object PanchangAstronomy {
         require(longitude in -180.0..180.0)
 
         val observer = Observer(latitude, longitude, 0.0)
-
         val startTime = createTime(date)
 
         val sunrise = searchRiseSet(
@@ -90,14 +101,8 @@ object PanchangAstronomy {
             )
         }
 
-        val sunLongitude = sunPosition(sunrise).elon
-        val moonLongitude = eclipticGeoMoon(sunrise).lon
-
-        val difference = normalizeAngle(
-            moonLongitude - sunLongitude
-        )
-
-        val tithiIndex = (difference / 12.0)
+        val difference = lunarElongation(sunrise)
+        val tithiIndex = floor(difference / 12.0)
             .toInt()
             .coerceIn(0, 29)
 
@@ -115,14 +120,148 @@ object PanchangAstronomy {
             tithiNames[numberInPaksha - 1]
         }
 
+        val previousBoundary = floor(difference / 12.0) * 12.0
+        val nextBoundary = normalizeAngle(previousBoundary + 12.0)
+
+        val startMillis = findBoundary(
+            sunrise,
+            previousBoundary,
+            searchBackward = true
+        )
+
+        val endMillis = findBoundary(
+            sunrise,
+            nextBoundary,
+            searchBackward = false
+        )
+
         return PanchangDailyData(
             tithi = tithi,
             paksha = paksha,
             tithiNumber = numberInPaksha,
             sunrise = formatTime(sunrise),
             sunset = formatTime(sunset),
-            calculationStatus = "खगोलीय गणना पूर्ण"
+            calculationStatus = if (
+                startMillis != null && endMillis != null
+            ) {
+                "खगोलीय गणना पूर्ण"
+            } else {
+                "तिथि सीमा की गणना अधूरी"
+            },
+            tithiStart = formatDateTime(startMillis),
+            tithiEnd = formatDateTime(endMillis)
         )
+    }
+
+    private fun lunarElongation(time: Time): Double {
+        val sunLongitude = sunPosition(time).elon
+        val moonLongitude = eclipticGeoMoon(time).lon
+
+        return normalizeAngle(moonLongitude - sunLongitude)
+    }
+
+    private fun findBoundary(
+        startTime: Time,
+        targetAngle: Double,
+        searchBackward: Boolean
+    ): Long? {
+
+        val startMillis = startTime.toMillisecondsSince1970()
+
+        fun differenceAt(millis: Long): Double {
+            val time = createTime(millis)
+            return signedAngleDifference(
+                lunarElongation(time),
+                targetAngle
+            )
+        }
+
+        var newerMillis = startMillis
+        var newerDifference = differenceAt(newerMillis)
+
+        if (kotlin.math.abs(newerDifference) < 0.000001) {
+            return startMillis
+        }
+
+        var olderMillis = startMillis
+        var olderDifference = newerDifference
+
+        repeat(120) {
+            val candidate = if (searchBackward) {
+                olderMillis - SEARCH_STEP_MILLIS
+            } else {
+                olderMillis + SEARCH_STEP_MILLIS
+            }
+
+            val candidateDifference = differenceAt(candidate)
+
+            val bracketFound = if (searchBackward) {
+                candidateDifference <= 0.0 &&
+                    newerDifference >= 0.0
+            } else {
+                newerDifference <= 0.0 &&
+                    candidateDifference >= 0.0
+            }
+
+            if (bracketFound) {
+                val low: Long
+                val high: Long
+
+                if (searchBackward) {
+                    low = candidate
+                    high = newerMillis
+                } else {
+                    low = olderMillis
+                    high = candidate
+                }
+
+                return bisectBoundary(
+                    low,
+                    high,
+                    targetAngle
+                )
+            }
+
+            olderMillis = candidate
+            olderDifference = candidateDifference
+            newerMillis = candidate
+            newerDifference = candidateDifference
+        }
+
+        return null
+    }
+
+    private fun bisectBoundary(
+        lowerMillis: Long,
+        upperMillis: Long,
+        targetAngle: Double
+    ): Long {
+
+        var low = lowerMillis
+        var high = upperMillis
+
+        while (high - low > BISECTION_TOLERANCE_MILLIS) {
+            val middle = low + (high - low) / 2
+            val difference = signedAngleDifference(
+                lunarElongation(createTime(middle)),
+                targetAngle
+            )
+
+            if (difference < 0.0) {
+                low = middle
+            } else {
+                high = middle
+            }
+        }
+
+        return low + (high - low) / 2
+    }
+
+    private fun signedAngleDifference(
+        angle: Double,
+        target: Double
+    ): Double {
+        return ((angle - target + 540.0) % 360.0) - 180.0
     }
 
     private fun createTime(date: LocalDate): Time {
@@ -141,6 +280,23 @@ object PanchangAstronomy {
         )
     }
 
+    private fun createTime(millis: Long): Time {
+        val utc = LocalDateTime.ofInstant(
+            Instant.ofEpochMilli(millis),
+            ZoneOffset.UTC
+        )
+
+        return Time(
+            utc.year,
+            utc.monthValue,
+            utc.dayOfMonth,
+            utc.hour,
+            utc.minute,
+            utc.second +
+                utc.nano / 1_000_000_000.0
+        )
+    }
+
     private fun normalizeAngle(angle: Double): Double {
         return ((angle % 360.0) + 360.0) % 360.0
     }
@@ -151,5 +307,13 @@ object PanchangAstronomy {
         return Instant.ofEpochMilli(
             time.toMillisecondsSince1970()
         ).atZone(indiaZone).format(timeFormat)
+    }
+
+    private fun formatDateTime(millis: Long?): String {
+        if (millis == null) return "उपलब्ध नहीं"
+
+        return Instant.ofEpochMilli(millis)
+            .atZone(indiaZone)
+            .format(dateTimeFormat)
     }
 }
