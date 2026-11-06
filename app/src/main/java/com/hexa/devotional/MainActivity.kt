@@ -27,8 +27,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import java.time.LocalDateTime
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.ZonedDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -37,6 +41,8 @@ private val DarkBg = Color(0xFF12141B)
 private val DarkCard = Color(0xFF222633)
 private val LightBg = Color(0xFFF5F1E8)
 private val LightCard = Color.White
+
+private val IndiaZone = ZoneId.of("Asia/Kolkata")
 
 data class Deity(val name: String, val subtitle: String)
 data class Category(val name: String, val description: String)
@@ -104,10 +110,66 @@ private fun DevotionalApp() {
     var deity by remember { mutableStateOf(deities.first()) }
     var category by remember { mutableStateOf(categories.first()) }
 
+    var currentTime by remember {
+        mutableStateOf(ZonedDateTime.now(IndiaZone))
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = ZonedDateTime.now(IndiaZone)
+            delay(1000)
+        }
+    }
+
+    val today = currentTime.toLocalDate()
+
+    var panchangData by remember {
+        mutableStateOf<PanchangDailyData?>(null)
+    }
+
+    var panchangError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    LaunchedEffect(today, office.latitude, office.longitude) {
+        panchangData = null
+        panchangError = null
+
+        val latitude = office.latitude
+        val longitude = office.longitude
+
+        if (latitude == null || longitude == null) {
+            panchangError = "इस Post Office के coordinates उपलब्ध नहीं हैं।"
+        } else {
+            try {
+                panchangData = withContext(Dispatchers.Default) {
+                    PanchangAstronomy.calculate(
+                        date = today,
+                        latitude = latitude,
+                        longitude = longitude
+                    )
+                }
+            } catch (e: Exception) {
+                panchangError = "पंचांग गणना नहीं हो सकी।"
+            }
+        }
+    }
+
     val bg = if (dark) DarkBg else LightBg
     val card = if (dark) DarkCard else LightCard
     val fg = if (dark) Color(0xFFF2EBDD) else Color(0xFF25221D)
     val muted = if (dark) Color(0xFFBDB5A6) else Color(0xFF71695E)
+
+    val tithiText = when {
+        panchangData != null ->
+            "${panchangData!!.tithi} · ${panchangData!!.paksha} पक्ष"
+
+        panchangError != null ->
+            "हिंदू तिथि: उपलब्ध नहीं"
+
+        else ->
+            "हिंदू तिथि: गणना हो रही है..."
+    }
 
     MaterialTheme(
         colorScheme = if (dark)
@@ -129,7 +191,13 @@ private fun DevotionalApp() {
         ) {
             Column(Modifier.fillMaxSize()) {
 
-                Header(dark, fg, muted) {
+                Header(
+                    dark = dark,
+                    fg = fg,
+                    muted = muted,
+                    currentTime = currentTime,
+                    tithiText = tithiText
+                ) {
                     page = "settings"
                 }
 
@@ -174,9 +242,12 @@ private fun DevotionalApp() {
                     )
 
                     "panchang" -> Panchang(
-                        location,
-                        fg,
-                        muted
+                        location = location,
+                        data = panchangData,
+                        error = panchangError,
+                        fg = fg,
+                        muted = muted,
+                        dark = dark
                     ) {
                         page = "settings"
                     }
@@ -191,24 +262,15 @@ private fun Header(
     dark: Boolean,
     fg: Color,
     muted: Color,
+    currentTime: ZonedDateTime,
+    tithiText: String,
     settings: () -> Unit
 ) {
-    var now by remember {
-        mutableStateOf(LocalDateTime.now())
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = LocalDateTime.now()
-            delay(1000)
-        }
-    }
-
-    val time = now.format(
+    val time = currentTime.format(
         DateTimeFormatter.ofPattern("hh:mm:ss a", Locale.ENGLISH)
     )
 
-    val date = now.format(
+    val date = currentTime.format(
         DateTimeFormatter.ofPattern(
             "dd MMM yyyy · EEEE",
             Locale("hi", "IN")
@@ -245,7 +307,7 @@ private fun Header(
             Text(date, color = muted, fontSize = 11.sp)
 
             Text(
-                "हिंदू तिथि: गणना लंबित",
+                tithiText,
                 color = Gold,
                 fontSize = 10.sp
             )
@@ -585,7 +647,15 @@ private fun Settings(
         Spacer(Modifier.height(20.dp))
 
         Text(
-            "HEXA Devotional · Version 0.1.0",
+            "Kalki · Version 0.1.0",
+            color = muted,
+            fontSize = 11.sp
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            "All Rights Served By पं शिवम सोनी.",
             color = muted,
             fontSize = 11.sp
         )
@@ -595,10 +665,15 @@ private fun Settings(
 @Composable
 private fun Panchang(
     location: String,
+    data: PanchangDailyData?,
+    error: String?,
     fg: Color,
     muted: Color,
+    dark: Boolean,
     back: () -> Unit
 ) {
+    val cardColor = if (dark) DarkCard else LightCard
+
     Column(
         Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
@@ -627,14 +702,45 @@ private fun Panchang(
 
         Spacer(Modifier.height(18.dp))
 
-        Text(
-            "स्थान-आधारित पंचांग गणना का अगला चरण अभी तैयार किया जा रहा है।",
-            color = Gold,
-            fontSize = 13.sp,
-            lineHeight = 22.sp
-        )
+        if (error != null) {
+            Text(
+                error,
+                color = Gold,
+                fontSize = 13.sp,
+                lineHeight = 22.sp
+            )
+        } else if (data == null) {
+            Text(
+                "पंचांग की गणना हो रही है...",
+                color = Gold,
+                fontSize = 13.sp
+            )
+        } else {
+            Text(
+                "आज का पंचांग",
+                color = Gold,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold
+            )
 
-        Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
+
+            PanchangRow("तिथि", data.tithi, fg, muted, cardColor)
+            PanchangRow("पक्ष", data.paksha, fg, muted, cardColor)
+            PanchangRow("तिथि संख्या", data.tithiNumber.toString(), fg, muted, cardColor)
+            PanchangRow("सूर्योदय", data.sunrise, fg, muted, cardColor)
+            PanchangRow("सूर्यास्त", data.sunset, fg, muted, cardColor)
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                data.calculationStatus,
+                color = muted,
+                fontSize = 11.sp
+            )
+        }
+
+        Spacer(Modifier.height(22.dp))
 
         Text(
             "शुक्ल पक्ष की तिथियाँ",
@@ -666,28 +772,53 @@ private fun Panchang(
             lineHeight = 22.sp
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(18.dp))
 
-        listOf(
-            "तिथि",
-            "पक्ष",
-            "नक्षत्र",
-            "योग",
-            "करण",
-            "संवत",
-            "सूर्योदय",
-            "सूर्यास्त"
-        ).forEach {
-            Row(
-                Modifier.fillMaxWidth()
-                    .padding(vertical = 5.dp)
-                    .background(DarkCard, RoundedCornerShape(10.dp))
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(it, color = fg)
-                Text("गणना लंबित", color = muted)
-            }
-        }
+        Text(
+            "अभी गणना में शामिल नहीं",
+            color = Gold,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        PanchangRow("नक्षत्र", "गणना लंबित", fg, muted, cardColor)
+        PanchangRow("योग", "गणना लंबित", fg, muted, cardColor)
+        PanchangRow("करण", "गणना लंबित", fg, muted, cardColor)
+        PanchangRow("संवत", "गणना लंबित", fg, muted, cardColor)
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "All Rights Served By पं शिवम सोनी.",
+            color = muted,
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+    }
+}
+
+@Composable
+private fun PanchangRow(
+    title: String,
+    value: String,
+    fg: Color,
+    muted: Color,
+    card: Color
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .background(card, RoundedCornerShape(10.dp))
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = fg)
+        Text(
+            value,
+            color = muted,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f).padding(start = 12.dp)
+        )
     }
 }
