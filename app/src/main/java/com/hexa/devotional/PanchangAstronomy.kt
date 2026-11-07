@@ -25,7 +25,20 @@ data class PanchangDailyData(
     val sunset: String,
     val calculationStatus: String,
     val tithiStart: String = "उपलब्ध नहीं",
-    val tithiEnd: String = "उपलब्ध नहीं"
+    val tithiEnd: String = "उपलब्ध नहीं",
+
+    val nakshatra: String = "उपलब्ध नहीं",
+    val nakshatraPada: Int = 0,
+    val nakshatraStart: String = "उपलब्ध नहीं",
+    val nakshatraEnd: String = "उपलब्ध नहीं",
+
+    val yoga: String = "उपलब्ध नहीं",
+    val yogaStart: String = "उपलब्ध नहीं",
+    val yogaEnd: String = "उपलब्ध नहीं",
+
+    val karana: String = "उपलब्ध नहीं",
+    val karanaStart: String = "उपलब्ध नहीं",
+    val karanaEnd: String = "उपलब्ध नहीं"
 )
 
 object PanchangAstronomy {
@@ -44,22 +57,50 @@ object PanchangAstronomy {
     private const val SEARCH_STEP_MILLIS = 30 * 60 * 1000L
     private const val BISECTION_TOLERANCE_MILLIS = 1000L
 
+    private const val TITHI_SPAN = 12.0
+    private const val KARANA_SPAN = 6.0
+    private const val NAKSHATRA_SPAN = 360.0 / 27.0
+    private const val YOGA_SPAN = 360.0 / 27.0
+
     private val tithiNames = listOf(
-        "प्रतिपदा",
-        "द्वितीया",
-        "तृतीया",
-        "चतुर्थी",
-        "पंचमी",
-        "षष्ठी",
-        "सप्तमी",
-        "अष्टमी",
-        "नवमी",
-        "दशमी",
-        "एकादशी",
-        "द्वादशी",
-        "त्रयोदशी",
-        "चतुर्दशी",
-        "पूर्णिमा"
+        "प्रतिपदा", "द्वितीया", "तृतीया",
+        "चतुर्थी", "पंचमी", "षष्ठी",
+        "सप्तमी", "अष्टमी", "नवमी",
+        "दशमी", "एकादशी", "द्वादशी",
+        "त्रयोदशी", "चतुर्दशी", "पूर्णिमा"
+    )
+
+    private val nakshatraNames = listOf(
+        "अश्विनी", "भरणी", "कृत्तिका",
+        "रोहिणी", "मृगशिरा", "आर्द्रा",
+        "पुनर्वसु", "पुष्य", "आश्लेषा",
+        "मघा", "पूर्वा फाल्गुनी", "उत्तरा फाल्गुनी",
+        "हस्त", "चित्रा", "स्वाती",
+        "विशाखा", "अनुराधा", "ज्येष्ठा",
+        "मूल", "पूर्वाषाढ़ा", "उत्तराषाढ़ा",
+        "श्रवण", "धनिष्ठा", "शतभिषा",
+        "पूर्वाभाद्रपद", "उत्तराभाद्रपद", "रेवती"
+    )
+
+    private val yogaNames = listOf(
+        "विष्कम्भ", "प्रीति", "आयुष्मान",
+        "सौभाग्य", "शोभन", "अतिगण्ड",
+        "सुकर्मा", "धृति", "शूल",
+        "गण्ड", "वृद्धि", "ध्रुव",
+        "व्याघात", "हर्षण", "वज्र",
+        "सिद्धि", "व्यतीपात", "वरीयान",
+        "परिघ", "शिव", "सिद्ध",
+        "साध्य", "शुभ", "शुक्ल",
+        "ब्रह्म", "इन्द्र", "वैधृति"
+    )
+
+    private val movableKaranaNames = listOf(
+        "बव", "बालव", "कौलव", "तैतिल",
+        "गर", "वणिज", "विष्टि (भद्रा)"
+    )
+
+    private val fixedKaranaNames = listOf(
+        "किंस्तुघ्न", "शकुनि", "चतुष्पद", "नाग"
     )
 
     fun calculate(
@@ -101,12 +142,28 @@ object PanchangAstronomy {
             )
         }
 
-        val difference = lunarElongation(sunrise)
-        val tithiIndex = floor(difference / 12.0)
-            .toInt()
-            .coerceIn(0, 29)
+        val sunriseMillis = sunrise.toMillisecondsSince1970()
+        val instant = Instant.ofEpochMilli(sunriseMillis)
 
-        val numberInPaksha = (tithiIndex % 15) + 1
+        val sunTropical = sunPosition(sunrise).elon
+        val moonTropical = eclipticGeoMoon(sunrise).lon
+
+        val sunSidereal = LahiriAyanamsha.siderealLongitude(
+            normalizeAngle(sunTropical),
+            instant
+        )
+
+        val moonSidereal = LahiriAyanamsha.siderealLongitude(
+            normalizeAngle(moonTropical),
+            instant
+        )
+
+        // Tithi: Sun-Moon angular separation
+        val elongation = normalizeAngle(moonTropical - sunTropical)
+        val tithiIndex = floor(elongation / TITHI_SPAN)
+            .toInt().coerceIn(0, 29)
+
+        val tithiNumber = (tithiIndex % 15) + 1
 
         val paksha = if (tithiIndex < 15) {
             "शुक्ल पक्ष"
@@ -114,118 +171,234 @@ object PanchangAstronomy {
             "कृष्ण पक्ष"
         }
 
-        val tithi = if (tithiIndex == 29) {
-            "अमावस्या"
-        } else {
-            tithiNames[numberInPaksha - 1]
+        val tithi = when (tithiIndex) {
+            14 -> "पूर्णिमा"
+            29 -> "अमावस्या"
+            else -> tithiNames[tithiNumber - 1]
         }
 
-        val previousBoundary = floor(difference / 12.0) * 12.0
-        val nextBoundary = normalizeAngle(previousBoundary + 12.0)
+        val tithiBoundary = tithiIndex * TITHI_SPAN
 
-        val startMillis = findBoundary(
-            sunrise,
-            previousBoundary,
-            searchBackward = true
+        val tithiStart = findBoundary(
+            sunriseMillis,
+            tithiBoundary,
+            TITHI_SPAN,
+            { time -> lunarElongation(time) },
+            true
         )
 
-        val endMillis = findBoundary(
-            sunrise,
-            nextBoundary,
-            searchBackward = false
+        val tithiEnd = findBoundary(
+            sunriseMillis,
+            tithiBoundary + TITHI_SPAN,
+            TITHI_SPAN,
+            { time -> lunarElongation(time) },
+            false
         )
+
+        // Nakshatra and Pada
+        val nakshatraIndex = floor(
+            moonSidereal / NAKSHATRA_SPAN
+        ).toInt().coerceIn(0, 26)
+
+        val degreesInNakshatra =
+            moonSidereal - nakshatraIndex * NAKSHATRA_SPAN
+
+        val nakshatraPada = (
+            floor(degreesInNakshatra / (NAKSHATRA_SPAN / 4.0))
+                .toInt() + 1
+            ).coerceIn(1, 4)
+
+        val nakshatraStartAngle =
+            nakshatraIndex * NAKSHATRA_SPAN
+
+        val nakshatraStart = findBoundary(
+            sunriseMillis,
+            nakshatraStartAngle,
+            NAKSHATRA_SPAN,
+            { time -> moonSiderealLongitude(time) },
+            true
+        )
+
+        val nakshatraEnd = findBoundary(
+            sunriseMillis,
+            nakshatraStartAngle + NAKSHATRA_SPAN,
+            NAKSHATRA_SPAN,
+            { time -> moonSiderealLongitude(time) },
+            false
+        )
+
+        // Yoga: Sum of sidereal Sun and Moon longitudes
+        val yogaAngle = normalizeAngle(sunSidereal + moonSidereal)
+
+        val yogaIndex = floor(yogaAngle / YOGA_SPAN)
+            .toInt().coerceIn(0, 26)
+
+        val yogaStartAngle = yogaIndex * YOGA_SPAN
+
+        val yogaStart = findBoundary(
+            sunriseMillis,
+            yogaStartAngle,
+            YOGA_SPAN,
+            { time -> yogaLongitude(time) },
+            true
+        )
+
+        val yogaEnd = findBoundary(
+            sunriseMillis,
+            yogaStartAngle + YOGA_SPAN,
+            YOGA_SPAN,
+            { time -> yogaLongitude(time) },
+            false
+        )
+
+        // Karana: Each half of a Tithi
+        val karanaIndex = floor(elongation / KARANA_SPAN)
+            .toInt().coerceIn(0, 59)
+
+        val karana = karanaName(karanaIndex)
+        val karanaStartAngle = karanaIndex * KARANA_SPAN
+
+        val karanaStart = findBoundary(
+            sunriseMillis,
+            karanaStartAngle,
+            KARANA_SPAN,
+            { time -> lunarElongation(time) },
+            true
+        )
+
+        val karanaEnd = findBoundary(
+            sunriseMillis,
+            karanaStartAngle + KARANA_SPAN,
+            KARANA_SPAN,
+            { time -> lunarElongation(time) },
+            false
+        )
+
+        val allBoundariesFound =
+            tithiStart != null && tithiEnd != null &&
+            nakshatraStart != null && nakshatraEnd != null &&
+            yogaStart != null && yogaEnd != null &&
+            karanaStart != null && karanaEnd != null
 
         return PanchangDailyData(
             tithi = tithi,
             paksha = paksha,
-            tithiNumber = numberInPaksha,
+            tithiNumber = tithiNumber,
             sunrise = formatTime(sunrise),
             sunset = formatTime(sunset),
-            calculationStatus = if (
-                startMillis != null && endMillis != null
-            ) {
-                "खगोलीय गणना पूर्ण"
+            calculationStatus = if (allBoundariesFound) {
+                "प्रारंभिक खगोलीय गणना पूर्ण"
             } else {
-                "तिथि सीमा की गणना अधूरी"
+                "कुछ समय-सीमाओं की गणना अधूरी"
             },
-            tithiStart = formatDateTime(startMillis),
-            tithiEnd = formatDateTime(endMillis)
+            tithiStart = formatDateTime(tithiStart),
+            tithiEnd = formatDateTime(tithiEnd),
+            nakshatra = nakshatraNames[nakshatraIndex],
+            nakshatraPada = nakshatraPada,
+            nakshatraStart = formatDateTime(nakshatraStart),
+            nakshatraEnd = formatDateTime(nakshatraEnd),
+            yoga = yogaNames[yogaIndex],
+            yogaStart = formatDateTime(yogaStart),
+            yogaEnd = formatDateTime(yogaEnd),
+            karana = karana,
+            karanaStart = formatDateTime(karanaStart),
+            karanaEnd = formatDateTime(karanaEnd)
         )
     }
 
-    private fun lunarElongation(time: Time): Double {
-        val sunLongitude = sunPosition(time).elon
-        val moonLongitude = eclipticGeoMoon(time).lon
+    private fun karanaName(index: Int): String {
+        return when (index) {
+            0 -> fixedKaranaNames[0]
+            in 1..56 -> movableKaranaNames[(index - 1) % 7]
+            57 -> fixedKaranaNames[1]
+            58 -> fixedKaranaNames[2]
+            else -> fixedKaranaNames[3]
+        }
+    }
 
-        return normalizeAngle(moonLongitude - sunLongitude)
+    private fun lunarElongation(time: Time): Double {
+        val sun = sunPosition(time).elon
+        val moon = eclipticGeoMoon(time).lon
+        return normalizeAngle(moon - sun)
+    }
+
+    private fun moonSiderealLongitude(time: Time): Double {
+        val tropical = normalizeAngle(eclipticGeoMoon(time).lon)
+        val instant = Instant.ofEpochMilli(
+            time.toMillisecondsSince1970()
+        )
+        return LahiriAyanamsha.siderealLongitude(tropical, instant)
+    }
+
+    private fun yogaLongitude(time: Time): Double {
+        val sun = normalizeAngle(sunPosition(time).elon)
+        val moon = normalizeAngle(eclipticGeoMoon(time).lon)
+        val instant = Instant.ofEpochMilli(
+            time.toMillisecondsSince1970()
+        )
+
+        val sunSidereal =
+            LahiriAyanamsha.siderealLongitude(sun, instant)
+
+        val moonSidereal =
+            LahiriAyanamsha.siderealLongitude(moon, instant)
+
+        return normalizeAngle(sunSidereal + moonSidereal)
     }
 
     private fun findBoundary(
-        startTime: Time,
+        startMillis: Long,
         targetAngle: Double,
+        span: Double,
+        angleAt: (Time) -> Double,
         searchBackward: Boolean
     ): Long? {
 
-        val startMillis = startTime.toMillisecondsSince1970()
-
         fun differenceAt(millis: Long): Double {
-            val time = createTime(millis)
             return signedAngleDifference(
-                lunarElongation(time),
-                targetAngle
+                angleAt(createTime(millis)),
+                normalizeAngle(targetAngle)
             )
         }
 
-        var newerMillis = startMillis
-        var newerDifference = differenceAt(newerMillis)
+        var currentMillis = startMillis
+        var currentDifference = differenceAt(currentMillis)
 
-        if (kotlin.math.abs(newerDifference) < 0.000001) {
-            return startMillis
+        if (kotlin.math.abs(currentDifference) < 0.000001) {
+            return currentMillis
         }
 
-        var olderMillis = startMillis
-        var olderDifference = newerDifference
-
-        repeat(120) {
-            val candidate = if (searchBackward) {
-                olderMillis - SEARCH_STEP_MILLIS
+        repeat(160) {
+            val candidateMillis = if (searchBackward) {
+                currentMillis - SEARCH_STEP_MILLIS
             } else {
-                olderMillis + SEARCH_STEP_MILLIS
+                currentMillis + SEARCH_STEP_MILLIS
             }
 
-            val candidateDifference = differenceAt(candidate)
+            val candidateDifference = differenceAt(candidateMillis)
 
             val bracketFound = if (searchBackward) {
                 candidateDifference <= 0.0 &&
-                    newerDifference >= 0.0
+                    currentDifference >= 0.0
             } else {
-                newerDifference <= 0.0 &&
+                currentDifference <= 0.0 &&
                     candidateDifference >= 0.0
             }
 
             if (bracketFound) {
-                val low: Long
-                val high: Long
-
-                if (searchBackward) {
-                    low = candidate
-                    high = newerMillis
-                } else {
-                    low = olderMillis
-                    high = candidate
-                }
+                val low = minOf(currentMillis, candidateMillis)
+                val high = maxOf(currentMillis, candidateMillis)
 
                 return bisectBoundary(
                     low,
                     high,
-                    targetAngle
+                    targetAngle,
+                    angleAt
                 )
             }
 
-            olderMillis = candidate
-            olderDifference = candidateDifference
-            newerMillis = candidate
-            newerDifference = candidateDifference
+            currentMillis = candidateMillis
+            currentDifference = candidateDifference
         }
 
         return null
@@ -234,7 +407,8 @@ object PanchangAstronomy {
     private fun bisectBoundary(
         lowerMillis: Long,
         upperMillis: Long,
-        targetAngle: Double
+        targetAngle: Double,
+        angleAt: (Time) -> Double
     ): Long {
 
         var low = lowerMillis
@@ -242,9 +416,10 @@ object PanchangAstronomy {
 
         while (high - low > BISECTION_TOLERANCE_MILLIS) {
             val middle = low + (high - low) / 2
+
             val difference = signedAngleDifference(
-                lunarElongation(createTime(middle)),
-                targetAngle
+                angleAt(createTime(middle)),
+                normalizeAngle(targetAngle)
             )
 
             if (difference < 0.0) {
