@@ -15,6 +15,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.floor
 
 data class PanchangDailyData(
@@ -26,16 +27,13 @@ data class PanchangDailyData(
     val calculationStatus: String,
     val tithiStart: String = "उपलब्ध नहीं",
     val tithiEnd: String = "उपलब्ध नहीं",
-
     val nakshatra: String = "उपलब्ध नहीं",
     val nakshatraPada: Int = 0,
     val nakshatraStart: String = "उपलब्ध नहीं",
     val nakshatraEnd: String = "उपलब्ध नहीं",
-
     val yoga: String = "उपलब्ध नहीं",
     val yogaStart: String = "उपलब्ध नहीं",
     val yogaEnd: String = "उपलब्ध नहीं",
-
     val karana: String = "उपलब्ध नहीं",
     val karanaStart: String = "उपलब्ध नहीं",
     val karanaEnd: String = "उपलब्ध नहीं"
@@ -109,8 +107,13 @@ object PanchangAstronomy {
         longitude: Double
     ): PanchangDailyData {
 
-        require(latitude in -90.0..90.0)
-        require(longitude in -180.0..180.0)
+        require(latitude.isFinite() && latitude in -90.0..90.0) {
+            "Invalid latitude"
+        }
+
+        require(longitude.isFinite() && longitude in -180.0..180.0) {
+            "Invalid longitude"
+        }
 
         val observer = Observer(latitude, longitude, 0.0)
         val startTime = createTime(date)
@@ -145,23 +148,25 @@ object PanchangAstronomy {
         val sunriseMillis = sunrise.toMillisecondsSince1970()
         val instant = Instant.ofEpochMilli(sunriseMillis)
 
-        val sunTropical = sunPosition(sunrise).elon
-        val moonTropical = eclipticGeoMoon(sunrise).lon
+        val sunTropical = normalizeAngle(sunPosition(sunrise).elon)
+        val moonTropical = normalizeAngle(eclipticGeoMoon(sunrise).lon)
 
         val sunSidereal = LahiriAyanamsha.siderealLongitude(
-            normalizeAngle(sunTropical),
+            sunTropical,
             instant
         )
 
         val moonSidereal = LahiriAyanamsha.siderealLongitude(
-            normalizeAngle(moonTropical),
+            moonTropical,
             instant
         )
 
-        // Tithi: Sun-Moon angular separation
+        // Tithi
         val elongation = normalizeAngle(moonTropical - sunTropical)
+
         val tithiIndex = floor(elongation / TITHI_SPAN)
-            .toInt().coerceIn(0, 29)
+            .toInt()
+            .coerceIn(0, 29)
 
         val tithiNumber = (tithiIndex % 15) + 1
 
@@ -177,11 +182,9 @@ object PanchangAstronomy {
             else -> tithiNames[tithiNumber - 1]
         }
 
-        val tithiBoundary = tithiIndex * TITHI_SPAN
-
         val tithiStart = findBoundary(
             sunriseMillis,
-            tithiBoundary,
+            tithiIndex * TITHI_SPAN,
             TITHI_SPAN,
             { time -> lunarElongation(time) },
             true
@@ -189,7 +192,7 @@ object PanchangAstronomy {
 
         val tithiEnd = findBoundary(
             sunriseMillis,
-            tithiBoundary + TITHI_SPAN,
+            (tithiIndex + 1) * TITHI_SPAN,
             TITHI_SPAN,
             { time -> lunarElongation(time) },
             false
@@ -208,12 +211,9 @@ object PanchangAstronomy {
                 .toInt() + 1
             ).coerceIn(1, 4)
 
-        val nakshatraStartAngle =
-            nakshatraIndex * NAKSHATRA_SPAN
-
         val nakshatraStart = findBoundary(
             sunriseMillis,
-            nakshatraStartAngle,
+            nakshatraIndex * NAKSHATRA_SPAN,
             NAKSHATRA_SPAN,
             { time -> moonSiderealLongitude(time) },
             true
@@ -221,23 +221,22 @@ object PanchangAstronomy {
 
         val nakshatraEnd = findBoundary(
             sunriseMillis,
-            nakshatraStartAngle + NAKSHATRA_SPAN,
+            (nakshatraIndex + 1) * NAKSHATRA_SPAN,
             NAKSHATRA_SPAN,
             { time -> moonSiderealLongitude(time) },
             false
         )
 
-        // Yoga: Sum of sidereal Sun and Moon longitudes
+        // Yoga
         val yogaAngle = normalizeAngle(sunSidereal + moonSidereal)
 
         val yogaIndex = floor(yogaAngle / YOGA_SPAN)
-            .toInt().coerceIn(0, 26)
-
-        val yogaStartAngle = yogaIndex * YOGA_SPAN
+            .toInt()
+            .coerceIn(0, 26)
 
         val yogaStart = findBoundary(
             sunriseMillis,
-            yogaStartAngle,
+            yogaIndex * YOGA_SPAN,
             YOGA_SPAN,
             { time -> yogaLongitude(time) },
             true
@@ -245,22 +244,22 @@ object PanchangAstronomy {
 
         val yogaEnd = findBoundary(
             sunriseMillis,
-            yogaStartAngle + YOGA_SPAN,
+            (yogaIndex + 1) * YOGA_SPAN,
             YOGA_SPAN,
             { time -> yogaLongitude(time) },
             false
         )
 
-        // Karana: Each half of a Tithi
+        // Karana
         val karanaIndex = floor(elongation / KARANA_SPAN)
-            .toInt().coerceIn(0, 59)
+            .toInt()
+            .coerceIn(0, 59)
 
         val karana = karanaName(karanaIndex)
-        val karanaStartAngle = karanaIndex * KARANA_SPAN
 
         val karanaStart = findBoundary(
             sunriseMillis,
-            karanaStartAngle,
+            karanaIndex * KARANA_SPAN,
             KARANA_SPAN,
             { time -> lunarElongation(time) },
             true
@@ -268,7 +267,7 @@ object PanchangAstronomy {
 
         val karanaEnd = findBoundary(
             sunriseMillis,
-            karanaStartAngle + KARANA_SPAN,
+            (karanaIndex + 1) * KARANA_SPAN,
             KARANA_SPAN,
             { time -> lunarElongation(time) },
             false
@@ -287,7 +286,7 @@ object PanchangAstronomy {
             sunrise = formatTime(sunrise),
             sunset = formatTime(sunset),
             calculationStatus = if (allBoundariesFound) {
-                "प्रारंभिक खगोलीय गणना पूर्ण"
+                "खगोलीय गणना पूर्ण - सत्यापन आवश्यक"
             } else {
                 "कुछ समय-सीमाओं की गणना अधूरी"
             },
@@ -327,12 +326,14 @@ object PanchangAstronomy {
         val instant = Instant.ofEpochMilli(
             time.toMillisecondsSince1970()
         )
+
         return LahiriAyanamsha.siderealLongitude(tropical, instant)
     }
 
     private fun yogaLongitude(time: Time): Double {
         val sun = normalizeAngle(sunPosition(time).elon)
         val moon = normalizeAngle(eclipticGeoMoon(time).lon)
+
         val instant = Instant.ofEpochMilli(
             time.toMillisecondsSince1970()
         )
@@ -346,6 +347,11 @@ object PanchangAstronomy {
         return normalizeAngle(sunSidereal + moonSidereal)
     }
 
+    /**
+     * Finds the nearest previous or next angular boundary.
+     * The expected segment span is checked to avoid accepting
+     * an unrelated angular crossing.
+     */
     private fun findBoundary(
         startMillis: Long,
         targetAngle: Double,
@@ -354,18 +360,27 @@ object PanchangAstronomy {
         searchBackward: Boolean
     ): Long? {
 
+        require(span > 0.0 && span < 180.0)
+
+        val target = normalizeAngle(targetAngle)
+
         fun differenceAt(millis: Long): Double {
             return signedAngleDifference(
                 angleAt(createTime(millis)),
-                normalizeAngle(targetAngle)
+                target
             )
         }
 
         var currentMillis = startMillis
         var currentDifference = differenceAt(currentMillis)
 
-        if (kotlin.math.abs(currentDifference) < 0.000001) {
+        if (abs(currentDifference) < 0.000001) {
             return currentMillis
+        }
+
+        // The target must be within the current segment.
+        if (abs(currentDifference) > span + 0.000001) {
+            return null
         }
 
         repeat(160) {
@@ -392,7 +407,7 @@ object PanchangAstronomy {
                 return bisectBoundary(
                     low,
                     high,
-                    targetAngle,
+                    target,
                     angleAt
                 )
             }
@@ -419,7 +434,7 @@ object PanchangAstronomy {
 
             val difference = signedAngleDifference(
                 angleAt(createTime(middle)),
-                normalizeAngle(targetAngle)
+                targetAngle
             )
 
             if (difference < 0.0) {
@@ -467,8 +482,7 @@ object PanchangAstronomy {
             utc.dayOfMonth,
             utc.hour,
             utc.minute,
-            utc.second +
-                utc.nano / 1_000_000_000.0
+            utc.second + utc.nano / 1_000_000_000.0
         )
     }
 
