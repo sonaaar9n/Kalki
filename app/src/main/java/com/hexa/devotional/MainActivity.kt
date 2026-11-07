@@ -7,14 +7,12 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -31,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZonedDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -78,6 +77,21 @@ private val categories = listOf(
     Category("प्राण प्रतिष्ठा अनुशासन", "विधि एवं निर्देश")
 )
 
+private val hindiMonths = listOf(
+    "जनवरी", "फ़रवरी", "मार्च", "अप्रैल",
+    "मई", "जून", "जुलाई", "अगस्त",
+    "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"
+)
+
+private val weekdays = listOf(
+    "रवि", "सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि"
+)
+
+private fun formatHindiDate(date: LocalDate): String {
+    val month = hindiMonths[date.monthValue - 1]
+    return "${date.dayOfMonth} $month ${date.year}"
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -123,32 +137,57 @@ private fun DevotionalApp() {
 
     val today = currentTime.toLocalDate()
 
+    var selectedDate by remember { mutableStateOf(today) }
+    var displayedMonth by remember {
+        mutableStateOf(YearMonth.from(today))
+    }
+
     var panchangData by remember {
         mutableStateOf<PanchangDailyData?>(null)
+    }
+
+    var monthData by remember {
+        mutableStateOf<HinduMonthResult?>(null)
     }
 
     var panchangError by remember {
         mutableStateOf<String?>(null)
     }
 
-    LaunchedEffect(today, office.latitude, office.longitude) {
+    LaunchedEffect(
+        selectedDate,
+        office.latitude,
+        office.longitude
+    ) {
         panchangData = null
+        monthData = null
         panchangError = null
 
         val latitude = office.latitude
         val longitude = office.longitude
 
         if (latitude == null || longitude == null) {
-            panchangError = "इस Post Office के coordinates उपलब्ध नहीं हैं।"
+            panchangError =
+                "इस Post Office के coordinates उपलब्ध नहीं हैं।"
         } else {
             try {
-                panchangData = withContext(Dispatchers.Default) {
-                    PanchangAstronomy.calculate(
-                        date = today,
+                val result = withContext(Dispatchers.Default) {
+                    val daily = PanchangAstronomy.calculate(
+                        date = selectedDate,
                         latitude = latitude,
                         longitude = longitude
                     )
+
+                    val month = HinduMonthCalculator.calculate(
+                        selectedDate
+                    )
+
+                    Pair(daily, month)
                 }
+
+                panchangData = result.first
+                monthData = result.second
+
             } catch (e: Exception) {
                 panchangError = "पंचांग गणना नहीं हो सकी।"
             }
@@ -162,7 +201,7 @@ private fun DevotionalApp() {
 
     val tithiText = when {
         panchangData != null ->
-            "${panchangData!!.tithi} · ${panchangData!!.paksha} पक्ष"
+            "${panchangData!!.tithi} · ${panchangData!!.paksha}"
 
         panchangError != null ->
             "हिंदू तिथि: उपलब्ध नहीं"
@@ -241,16 +280,33 @@ private fun DevotionalApp() {
                         { page = "panchang" }
                     )
 
-                    "panchang" -> Panchang(
+                    "panchang" -> PanchangCalendarScreen(
                         location = location,
+                        selectedDate = selectedDate,
+                        displayedMonth = displayedMonth,
                         data = panchangData,
+                        monthData = monthData,
                         error = panchangError,
+                        today = today,
                         fg = fg,
                         muted = muted,
-                        dark = dark
-                    ) {
-                        page = "settings"
-                    }
+                        card = card,
+                        dark = dark,
+                        onBack = { page = "settings" },
+                        onPreviousMonth = {
+                            displayedMonth = displayedMonth.minusMonths(1)
+                        },
+                        onNextMonth = {
+                            displayedMonth = displayedMonth.plusMonths(1)
+                        },
+                        onSelectDate = {
+                            selectedDate = it
+                        },
+                        onToday = {
+                            selectedDate = today
+                            displayedMonth = YearMonth.from(today)
+                        }
+                    )
                 }
             }
         }
@@ -401,13 +457,15 @@ private fun Menu(
             modifier = Modifier.padding(vertical = 12.dp)
         )
 
-        LazyVerticalGrid(
-            GridCells.Fixed(2),
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
             contentPadding = PaddingValues(bottom = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(deities) { item ->
+            items(deities.size) { index ->
+                val item = deities[index]
+
                 Column(
                     Modifier.fillMaxWidth()
                         .background(card, RoundedCornerShape(16.dp))
@@ -640,7 +698,7 @@ private fun Settings(
             )
 
             TextButton(onClick = openPanchang) {
-                Text("देव पंचांग खोलें")
+                Text("हिंदू कैलेंडर खोलें")
             }
         }
 
@@ -663,32 +721,38 @@ private fun Settings(
 }
 
 @Composable
-private fun Panchang(
+private fun PanchangCalendarScreen(
     location: String,
+    selectedDate: LocalDate,
+    displayedMonth: YearMonth,
     data: PanchangDailyData?,
+    monthData: HinduMonthResult?,
     error: String?,
+    today: LocalDate,
     fg: Color,
     muted: Color,
+    card: Color,
     dark: Boolean,
-    back: () -> Unit
+    onBack: () -> Unit,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onSelectDate: (LocalDate) -> Unit,
+    onToday: () -> Unit
 ) {
-    val cardColor = if (dark) DarkCard else LightCard
-
     Column(
         Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(18.dp)
+            .padding(horizontal = 16.dp)
     ) {
         Text(
             "‹ सेटिंग्स",
             color = Gold,
-            modifier = Modifier.clickable { back() }
+            modifier = Modifier.clickable { onBack() }
+                .padding(vertical = 8.dp)
         )
 
-        Spacer(Modifier.height(16.dp))
-
         Text(
-            "॥ देव पंचांग ॥",
+            "॥ हिंदू कैलेंडर ॥",
             color = fg,
             fontSize = 27.sp,
             fontWeight = FontWeight.Bold
@@ -697,94 +761,244 @@ private fun Panchang(
         Text(
             "स्थान: $location",
             color = muted,
-            fontSize = 13.sp
+            fontSize = 12.sp
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
 
-        if (error != null) {
-            Text(
-                error,
-                color = Gold,
-                fontSize = 13.sp,
-                lineHeight = 22.sp
-            )
-        } else if (data == null) {
-            Text(
-                "पंचांग की गणना हो रही है...",
-                color = Gold,
-                fontSize = 13.sp
-            )
-        } else {
-            Text(
-                "आज का पंचांग",
-                color = Gold,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+        // Month navigation
+        Row(
+            Modifier.fillMaxWidth()
+                .background(card, RoundedCornerShape(14.dp))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            IconButton(onClick = onPreviousMonth) {
+                Icon(
+                    Icons.Default.ChevronLeft,
+                    contentDescription = "पिछला महीना",
+                    tint = Gold
+                )
+            }
 
-            Spacer(Modifier.height(10.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "${hindiMonths[displayedMonth.monthValue - 1]} ${displayedMonth.year}",
+                    color = fg,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold
+                )
 
-            PanchangRow("तिथि", data.tithi, fg, muted, cardColor)
-            PanchangRow("पक्ष", data.paksha, fg, muted, cardColor)
-            PanchangRow("तिथि संख्या", data.tithiNumber.toString(), fg, muted, cardColor)
-            PanchangRow("सूर्योदय", data.sunrise, fg, muted, cardColor)
-            PanchangRow("सूर्यास्त", data.sunset, fg, muted, cardColor)
+                Text(
+                    "Gregorian Calendar",
+                    color = muted,
+                    fontSize = 10.sp
+                )
+            }
 
-            Spacer(Modifier.height(10.dp))
-
-            Text(
-                data.calculationStatus,
-                color = muted,
-                fontSize = 11.sp
-            )
+            IconButton(onClick = onNextMonth) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "अगला महीना",
+                    tint = Gold
+                )
+            }
         }
 
-        Spacer(Modifier.height(22.dp))
+        TextButton(
+            onClick = onToday,
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Text("आज पर जाएँ")
+        }
 
+        // Weekday headings
+        Row(Modifier.fillMaxWidth()) {
+            weekdays.forEach { day ->
+                Text(
+                    day,
+                    modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    color = Gold,
+                    textAlign = TextAlign.Center,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Calendar dates, Sunday first
+        val firstDay = displayedMonth.atDay(1)
+        val offset = firstDay.dayOfWeek.value % 7
+        val totalCells = ((offset + displayedMonth.lengthOfMonth() + 6) / 7) * 7
+
+        for (weekStart in 0 until totalCells step 7) {
+            Row(Modifier.fillMaxWidth()) {
+                for (column in 0..6) {
+                    val cellIndex = weekStart + column
+                    val dayNumber = cellIndex - offset + 1
+
+                    if (dayNumber in 1..displayedMonth.lengthOfMonth()) {
+                        val date = displayedMonth.atDay(dayNumber)
+                        val isSelected = date == selectedDate
+                        val isToday = date == today
+
+                        Column(
+                            Modifier.weight(1f)
+                                .padding(2.dp)
+                                .background(
+                                    when {
+                                        isSelected -> Gold.copy(alpha = 0.28f)
+                                        isToday -> card.copy(alpha = 0.9f)
+                                        else -> Color.Transparent
+                                    },
+                                    RoundedCornerShape(9.dp)
+                                )
+                                .clickable { onSelectDate(date) }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                dayNumber.toString(),
+                                color = if (isSelected) Gold else fg,
+                                fontWeight = if (isSelected || isToday)
+                                    FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 15.sp
+                            )
+
+                            if (isToday) {
+                                Text(
+                                    "आज",
+                                    color = Gold,
+                                    fontSize = 8.sp
+                                )
+                            } else {
+                                Spacer(Modifier.height(10.dp))
+                            }
+                        }
+                    } else {
+                        Spacer(
+                            Modifier.weight(1f)
+                                .height(43.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Selected date information
         Text(
-            "शुक्ल पक्ष की तिथियाँ",
-            color = fg,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        Text(
-            "एकम 1 · दूज 2 · तीज 3 · चतुर्थी 4 · पंचमी 5 · षष्ठी 6 · सप्तमी 7 · अष्टमी 8 · नवमी 9 · दशमी 10 · ग्यारस 11 · बारस 12 · तेरस 13 · चौदस 14 · पूर्णिमा 15",
-            color = muted,
-            fontSize = 13.sp,
-            lineHeight = 22.sp
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-            "कृष्ण पक्ष की तिथियाँ",
-            color = fg,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-
-        Text(
-            "एकम 1 · दूज 2 · तीज 3 · चतुर्थी 4 · पंचमी 5 · षष्ठी 6 · सप्तमी 7 · अष्टमी 8 · नवमी 9 · दशमी 10 · ग्यारस 11 · बारस 12 · तेरस 13 · चौदस 14 · अमावस्या 15",
-            color = muted,
-            fontSize = 13.sp,
-            lineHeight = 22.sp
-        )
-
-        Spacer(Modifier.height(18.dp))
-
-        Text(
-            "अभी गणना में शामिल नहीं",
+            "चयनित तारीख",
             color = Gold,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold
         )
 
-        PanchangRow("नक्षत्र", "गणना लंबित", fg, muted, cardColor)
-        PanchangRow("योग", "गणना लंबित", fg, muted, cardColor)
-        PanchangRow("करण", "गणना लंबित", fg, muted, cardColor)
-        PanchangRow("संवत", "गणना लंबित", fg, muted, cardColor)
+        Text(
+            formatHindiDate(selectedDate),
+            color = fg,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            selectedDate.dayOfWeek.getDisplayName(
+                java.time.format.TextStyle.FULL,
+                Locale("hi", "IN")
+            ),
+            color = muted,
+            fontSize = 12.sp
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Hindu month
+        Text(
+            "हिंदू मास",
+            color = Gold,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        if (monthData == null) {
+            Text(
+                error ?: "मास की गणना हो रही है...",
+                color = muted,
+                fontSize = 13.sp
+            )
+        } else {
+            val monthName = if (monthData.isAdhikaMonth) {
+                "अधिक ${monthData.month.hindiName}"
+            } else {
+                monthData.month.hindiName
+            }
+
+            CalendarInfoRow("मास", monthName, fg, muted, card)
+            CalendarInfoRow(
+                "गणना स्थिति",
+                monthData.calculationStatus,
+                fg,
+                muted,
+                card
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            "दैनिक पंचांग",
+            color = Gold,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        when {
+            error != null -> {
+                Text(error, color = Gold, fontSize = 13.sp)
+            }
+
+            data == null -> {
+                Text(
+                    "पंचांग की गणना हो रही है...",
+                    color = muted,
+                    fontSize = 13.sp
+                )
+            }
+
+            else -> {
+                CalendarInfoRow("तिथि", data.tithi, fg, muted, card)
+                CalendarInfoRow("पक्ष", data.paksha, fg, muted, card)
+                CalendarInfoRow("तिथि संख्या", data.tithiNumber.toString(), fg, muted, card)
+                CalendarInfoRow("तिथि प्रारंभ", data.tithiStart, fg, muted, card)
+                CalendarInfoRow("तिथि समाप्त", data.tithiEnd, fg, muted, card)
+
+                CalendarInfoRow("नक्षत्र", data.nakshatra, fg, muted, card)
+                CalendarInfoRow("नक्षत्र पाद", data.nakshatraPada.toString(), fg, muted, card)
+                CalendarInfoRow("नक्षत्र प्रारंभ", data.nakshatraStart, fg, muted, card)
+                CalendarInfoRow("नक्षत्र समाप्त", data.nakshatraEnd, fg, muted, card)
+
+                CalendarInfoRow("योग", data.yoga, fg, muted, card)
+                CalendarInfoRow("योग प्रारंभ", data.yogaStart, fg, muted, card)
+                CalendarInfoRow("योग समाप्त", data.yogaEnd, fg, muted, card)
+
+                CalendarInfoRow("करण", data.karana, fg, muted, card)
+                CalendarInfoRow("करण प्रारंभ", data.karanaStart, fg, muted, card)
+                CalendarInfoRow("करण समाप्त", data.karanaEnd, fg, muted, card)
+
+                CalendarInfoRow("सूर्योदय", data.sunrise, fg, muted, card)
+                CalendarInfoRow("सूर्यास्त", data.sunset, fg, muted, card)
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    data.calculationStatus,
+                    color = muted,
+                    fontSize = 11.sp
+                )
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
 
@@ -794,11 +1008,13 @@ private fun Panchang(
             fontSize = 11.sp,
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
-private fun PanchangRow(
+private fun CalendarInfoRow(
     title: String,
     value: String,
     fg: Color,
@@ -807,18 +1023,24 @@ private fun PanchangRow(
 ) {
     Row(
         Modifier.fillMaxWidth()
-            .padding(vertical = 5.dp)
+            .padding(vertical = 4.dp)
             .background(card, RoundedCornerShape(10.dp))
-            .padding(14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = fg)
+        Text(
+            title,
+            color = fg,
+            modifier = Modifier.weight(1f),
+            fontSize = 13.sp
+        )
+
         Text(
             value,
             color = muted,
             textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f).padding(start = 12.dp)
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1.2f)
         )
     }
 }
