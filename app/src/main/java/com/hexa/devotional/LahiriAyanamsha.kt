@@ -20,20 +20,22 @@ object LahiriAyanamsha {
     private const val INITIAL_AYANAMSHA_ARC_SECONDS =
         23.0 * 3600.0 + 51.0 * 60.0 + 25.532
 
-    // Precession coefficients in arcseconds per Julian century.
+    // Mean precession coefficients in arcseconds.
     private const val PRECESSION_RATE = 5029.0966
     private const val PRECESSION_SECOND_ORDER = 1.11161
 
     /**
-     * Returns approximate mean Lahiri ayanamsha in degrees.
+     * Approximate mean Lahiri ayanamsha in degrees.
      *
-     * This polynomial does not include the complete
-     * true-nutation correction used by full ephemeris systems.
+     * This polynomial does not include complete
+     * nutation or a full ephemeris correction.
      */
     fun calculate(instant: Instant): Double {
 
         val julianDay =
-            instant.toEpochMilli() / 86400000.0 + 2440587.5
+            2440587.5 +
+                instant.epochSecond / 86400.0 +
+                instant.nano / 86400000000000.0
 
         val centuries =
             (julianDay - J2000_JULIAN_DAY) / 36525.0
@@ -48,33 +50,53 @@ object LahiriAyanamsha {
     }
 
     /**
-     * Converts tropical longitude into Lahiri sidereal longitude.
-     *
-     * Longitude must be between 0 and 360 degrees.
+     * Converts tropical longitude into sidereal longitude.
+     * Input range: 0° to 360°.
      */
     fun siderealLongitude(
         tropicalLongitude: Double,
         instant: Instant
     ): Double {
 
-        require(tropicalLongitude in 0.0..360.0)
+        require(
+            tropicalLongitude.isFinite() &&
+                tropicalLongitude in 0.0..360.0
+        ) {
+            "Tropical longitude must be between 0 and 360 degrees."
+        }
 
-        val result =
+        return normalize(
             tropicalLongitude - calculate(instant)
-
-        return normalize(result)
+        )
     }
 
     /**
-     * Returns sidereal longitude and zodiac sign information.
+     * Returns sidereal longitude and Rashi information.
      *
-     * Rashi numbering:
-     * 1 = मेष, 2 = वृषभ ... 12 = मीन
+     * 1 = Mesha
+     * 2 = Vrishabha
+     * 3 = Mithuna
+     * 4 = Karka
+     * 5 = Simha
+     * 6 = Kanya
+     * 7 = Tula
+     * 8 = Vrischika
+     * 9 = Dhanu
+     * 10 = Makara
+     * 11 = Kumbha
+     * 12 = Meena
      */
     fun calculatePosition(
         tropicalLongitude: Double,
         instant: Instant
     ): SiderealPosition {
+
+        require(
+            tropicalLongitude.isFinite() &&
+                tropicalLongitude in 0.0..360.0
+        ) {
+            "Tropical longitude must be between 0 and 360 degrees."
+        }
 
         val ayanamsha = calculate(instant)
 
