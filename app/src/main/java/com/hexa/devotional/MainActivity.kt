@@ -142,12 +142,8 @@ private fun DevotionalApp() {
         mutableStateOf(YearMonth.from(today))
     }
 
-    var panchangData by remember {
-        mutableStateOf<PanchangDailyData?>(null)
-    }
-
-    var monthData by remember {
-        mutableStateOf<HinduMonthResult?>(null)
+    var calendarDay by remember {
+        mutableStateOf<HinduCalendarDay?>(null)
     }
 
     var panchangError by remember {
@@ -159,8 +155,7 @@ private fun DevotionalApp() {
         office.latitude,
         office.longitude
     ) {
-        panchangData = null
-        monthData = null
+        calendarDay = null
         panchangError = null
 
         val latitude = office.latitude
@@ -171,23 +166,13 @@ private fun DevotionalApp() {
                 "इस Post Office के coordinates उपलब्ध नहीं हैं।"
         } else {
             try {
-                val result = withContext(Dispatchers.Default) {
-                    val daily = PanchangAstronomy.calculate(
+                calendarDay = withContext(Dispatchers.Default) {
+                    HinduCalendarEngine.calculateDay(
                         date = selectedDate,
                         latitude = latitude,
                         longitude = longitude
                     )
-
-                    val month = HinduMonthCalculator.calculate(
-                        selectedDate
-                    )
-
-                    Pair(daily, month)
                 }
-
-                panchangData = result.first
-                monthData = result.second
-
             } catch (e: Exception) {
                 panchangError = "पंचांग गणना नहीं हो सकी।"
             }
@@ -200,8 +185,8 @@ private fun DevotionalApp() {
     val muted = if (dark) Color(0xFFBDB5A6) else Color(0xFF71695E)
 
     val tithiText = when {
-        panchangData != null ->
-            "${panchangData!!.tithi} · ${panchangData!!.paksha}"
+        calendarDay != null ->
+            "${calendarDay!!.panchang.tithi} · ${calendarDay!!.panchang.paksha}"
 
         panchangError != null ->
             "हिंदू तिथि: उपलब्ध नहीं"
@@ -284,14 +269,12 @@ private fun DevotionalApp() {
                         location = location,
                         selectedDate = selectedDate,
                         displayedMonth = displayedMonth,
-                        data = panchangData,
-                        monthData = monthData,
+                        calendarDay = calendarDay,
                         error = panchangError,
                         today = today,
                         fg = fg,
                         muted = muted,
                         card = card,
-                        dark = dark,
                         onBack = { page = "settings" },
                         onPreviousMonth = {
                             displayedMonth = displayedMonth.minusMonths(1)
@@ -725,20 +708,21 @@ private fun PanchangCalendarScreen(
     location: String,
     selectedDate: LocalDate,
     displayedMonth: YearMonth,
-    data: PanchangDailyData?,
-    monthData: HinduMonthResult?,
+    calendarDay: HinduCalendarDay?,
     error: String?,
     today: LocalDate,
     fg: Color,
     muted: Color,
     card: Color,
-    dark: Boolean,
     onBack: () -> Unit,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onSelectDate: (LocalDate) -> Unit,
     onToday: () -> Unit
 ) {
+    val data = calendarDay?.panchang
+    val monthData = calendarDay
+
     Column(
         Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
@@ -766,7 +750,6 @@ private fun PanchangCalendarScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Month navigation
         Row(
             Modifier.fillMaxWidth()
                 .background(card, RoundedCornerShape(14.dp))
@@ -813,7 +796,6 @@ private fun PanchangCalendarScreen(
             Text("आज पर जाएँ")
         }
 
-        // Weekday headings
         Row(Modifier.fillMaxWidth()) {
             weekdays.forEach { day ->
                 Text(
@@ -827,10 +809,10 @@ private fun PanchangCalendarScreen(
             }
         }
 
-        // Calendar dates, Sunday first
         val firstDay = displayedMonth.atDay(1)
         val offset = firstDay.dayOfWeek.value % 7
-        val totalCells = ((offset + displayedMonth.lengthOfMonth() + 6) / 7) * 7
+        val totalCells =
+            ((offset + displayedMonth.lengthOfMonth() + 6) / 7) * 7
 
         for (weekStart in 0 until totalCells step 7) {
             Row(Modifier.fillMaxWidth()) {
@@ -888,7 +870,6 @@ private fun PanchangCalendarScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Selected date information
         Text(
             "चयनित तारीख",
             color = Gold,
@@ -914,7 +895,6 @@ private fun PanchangCalendarScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Hindu month
         Text(
             "हिंदू मास",
             color = Gold,
@@ -930,9 +910,9 @@ private fun PanchangCalendarScreen(
             )
         } else {
             val monthName = if (monthData.isAdhikaMonth) {
-                "अधिक ${monthData.month.hindiName}"
+                "अधिक ${monthData.hinduMonth.hindiName}"
             } else {
-                monthData.month.hindiName
+                monthData.hinduMonth.hindiName
             }
 
             CalendarInfoRow("मास", monthName, fg, muted, card)
@@ -970,14 +950,38 @@ private fun PanchangCalendarScreen(
             else -> {
                 CalendarInfoRow("तिथि", data.tithi, fg, muted, card)
                 CalendarInfoRow("पक्ष", data.paksha, fg, muted, card)
-                CalendarInfoRow("तिथि संख्या", data.tithiNumber.toString(), fg, muted, card)
+                CalendarInfoRow(
+                    "तिथि संख्या",
+                    data.tithiNumber.toString(),
+                    fg,
+                    muted,
+                    card
+                )
                 CalendarInfoRow("तिथि प्रारंभ", data.tithiStart, fg, muted, card)
                 CalendarInfoRow("तिथि समाप्त", data.tithiEnd, fg, muted, card)
 
                 CalendarInfoRow("नक्षत्र", data.nakshatra, fg, muted, card)
-                CalendarInfoRow("नक्षत्र पाद", data.nakshatraPada.toString(), fg, muted, card)
-                CalendarInfoRow("नक्षत्र प्रारंभ", data.nakshatraStart, fg, muted, card)
-                CalendarInfoRow("नक्षत्र समाप्त", data.nakshatraEnd, fg, muted, card)
+                CalendarInfoRow(
+                    "नक्षत्र पाद",
+                    data.nakshatraPada.toString(),
+                    fg,
+                    muted,
+                    card
+                )
+                CalendarInfoRow(
+                    "नक्षत्र प्रारंभ",
+                    data.nakshatraStart,
+                    fg,
+                    muted,
+                    card
+                )
+                CalendarInfoRow(
+                    "नक्षत्र समाप्त",
+                    data.nakshatraEnd,
+                    fg,
+                    muted,
+                    card
+                )
 
                 CalendarInfoRow("योग", data.yoga, fg, muted, card)
                 CalendarInfoRow("योग प्रारंभ", data.yogaStart, fg, muted, card)
